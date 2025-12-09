@@ -1,15 +1,17 @@
-import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
-import org.telegram.telegrambots.meta.TelegramBotsApi;
+import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 public class Main {
     public static void main(String[] args) throws Exception {
 
-        // 🔑 Inserisci il token ottenuto da BotFather
-        String token = "INSERISCI_IL_TUO_TOKEN_QUI";
-
-        TelegramBotsApi api = new TelegramBotsApi();
-        api.registerBot(new OkHttpTelegramClient(token), new KiTsuBot());
-
-        System.out.println("Bot avviato!");
+        try {
+            String botToken = ConfigReader.get("BOT_TOKEN");
+            TelegramBotsLongPollingApplication botsApplication = new TelegramBotsLongPollingApplication();
+            botsApplication.registerBot(botToken, new KitsuBot());
+            System.out.println("Bot avviato!");
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
     }
+
 }
