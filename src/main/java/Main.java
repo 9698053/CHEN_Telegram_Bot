@@ -3,6 +3,8 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 public class Main {
     public static void main(String[] args) throws Exception {
+        // 1️⃣ inizializza il database
+        Database.init();
 
         try {
             String botToken = ConfigReader.get("BOT_TOKEN");
