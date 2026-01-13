@@ -13,7 +13,7 @@ public class KitsuBot implements LongPollingSingleThreadUpdateConsumer {
     private TelegramClient telegramClient = new OkHttpTelegramClient(ConfigReader.get("BOT_TOKEN"));
     private KitsuApi kitsuApi = new KitsuApi();
 
-    private Map<Long, String> userMode = new HashMap<>(); // "anime", "manga" o null
+    private Map<Long, String> userMode = new HashMap<>();
 
     @Override
     public void consume(Update update) {
@@ -29,6 +29,9 @@ public class KitsuBot implements LongPollingSingleThreadUpdateConsumer {
         String firstName = update.getMessage().getFrom().getFirstName();
         UserDAO.saveUser(userId, username, firstName);
 
+        // Crea stats se non esistono
+        StatsDAO.createStatsIfNotExist(userId);
+
         System.out.println(firstName + "(" + userId + "): " + text);
 
         try {
@@ -38,249 +41,335 @@ public class KitsuBot implements LongPollingSingleThreadUpdateConsumer {
                         + "Puoi anche usare /help per vedere tutti i comandi.";
                 telegramClient.execute(new SendMessage(chatId, welcomeMessage));
                 userMode.put(userId, null);
+                return;
             }
 
             // --- /help ---
-            else if (text.equalsIgnoreCase("/help")) {
+            if (text.equalsIgnoreCase("/help")) {
                 String helpText = """
-                        Comandi disponibili:
+                        📚 Comandi disponibili:
+                        
+                        🔍 Ricerca:
                         /anime - Cerca un anime
                         /manga - Cerca un manga
-                        /addwatch <anime/manga> <titolo> - Aggiungi alla tua watchlist
+                        
+                        📝 Watchlist:
+                        /addwatch <anime/manga> <titolo> - Aggiungi alla watchlist
                         /done <anime/manga> <titolo> - Segna come completato
                         /remove <anime/manga> <titolo> - Rimuovi dalla watchlist
                         /listwatch - Mostra anime/manga da guardare
                         /listwatched - Mostra anime/manga già visti
+                        
+                        ⚙️ Gestione:
                         /progress <anime/manga> <titolo> <numero> - Aggiorna progress
                         /rate <anime/manga> <titolo> <1-10> - Vota
                         /note <anime/manga> <titolo> <testo> - Aggiungi nota
                         """;
                 telegramClient.execute(new SendMessage(chatId, helpText));
+                return;
             }
 
             // --- Modalità ricerca ---
-            else if (text.equalsIgnoreCase("/anime")) {
+            if (text.equalsIgnoreCase("/anime")) {
                 telegramClient.execute(new SendMessage(chatId, "Scrivi il nome dell'anime che vuoi cercare:"));
                 userMode.put(userId, "anime");
+                return;
             }
-            else if (text.equalsIgnoreCase("/manga")) {
+
+            if (text.equalsIgnoreCase("/manga")) {
                 telegramClient.execute(new SendMessage(chatId, "Scrivi il nome del manga che vuoi cercare:"));
                 userMode.put(userId, "manga");
+                return;
             }
 
-            // --- Watchlist commands ---
-            else if (text.startsWith("/")) {
-                String[] parts = text.split(" ", 3); // comando, tipo, titolo/altro
-                String command = parts[0].toLowerCase();
-
-                if (parts.length >= 2) {
-                    String type = parts[1].toLowerCase();
-                    String rest = parts.length == 3 ? parts[2] : "";
-
-                    SendMessage reply;
-
-                    switch (command) {
-                        case "/addwatch": {
-                            if (rest.isEmpty()) {
-                                telegramClient.execute(new SendMessage(chatId, "Uso corretto: /addwatch <anime/manga> <titolo>"));
-                                break;
-                            }
-
-                            String title = rest.trim(); // titolo = tutto il resto
-                            if (!type.equals("anime") && !type.equals("manga")) {
-                                telegramClient.execute(new SendMessage(chatId, "Tipo non valido! Usa 'anime' o 'manga'."));
-                                break;
-                            }
-
-                            if (WatchlistDAO.existsInWatchlist(userId, type, title)) {
-                                telegramClient.execute(new SendMessage(chatId, "Questo anime/manga è già nella tua watchlist!"));
-                                break;
-                            }
-
-                            WatchlistDAO.addToWatchlist(userId, type, title);
-                            telegramClient.execute(new SendMessage(chatId, "Aggiunto alla tua watchlist!"));
-                            break;
-                        }
-
-                        case "/done":
-                            if (rest.isEmpty()) {
-                                reply = new SendMessage(chatId, "Uso corretto: /done <anime/manga> <titolo>");
-                            } else {
-                                if (WatchlistDAO.markAsDone(userId, type, rest))
-                                    reply = new SendMessage(chatId, "Segnato come completato!");
-                                else
-                                    reply = new SendMessage(chatId, "Errore: titolo non trovato nella tua watchlist.");
-                            }
-                            telegramClient.execute(reply);
-                            break;
-
-                        case "/remove":
-                            if (rest.isEmpty()) reply = new SendMessage(chatId, "Uso corretto: /remove <anime/manga> <titolo>");
-                            else if (WatchlistDAO.removeFromWatchlist(userId, type, rest)) reply = new SendMessage(chatId, "Rimosso dalla tua watchlist!");
-                            else reply = new SendMessage(chatId, "Errore: titolo non trovato nella tua watchlist.");
-                            telegramClient.execute(reply);
-                            break;
-
-                        case "/progress":
-                            if (rest.isEmpty()) {
-                                reply = new SendMessage(chatId, "Uso corretto: /progress <anime/manga> <titolo> <numero>");
-                            } else {
-                                String[] partsProg = rest.split(" ");
-                                if (partsProg.length < 2) {
-                                    reply = new SendMessage(chatId, "Uso corretto: /progress <anime/manga> <titolo> <numero>");
-                                } else {
-                                    try {
-                                        int prog = Integer.parseInt(partsProg[partsProg.length - 1]); // ultimo elemento = numero
-                                        String titleProg = String.join(" ", Arrays.copyOf(partsProg, partsProg.length - 1)); // resto = titolo
-
-                                        if (WatchlistDAO.updateProgress(userId, type, titleProg, prog))
-                                            reply = new SendMessage(chatId, "Progress aggiornato!");
-                                        else
-                                            reply = new SendMessage(chatId, "Errore: titolo non trovato nella tua watchlist.");
-                                    } catch (NumberFormatException e) {
-                                        reply = new SendMessage(chatId, "Il progress deve essere un numero!");
-                                    }
-                                }
-                            }
-                            telegramClient.execute(reply);
-                            break;
-
-                        case "/rate":
-                            if (rest.isEmpty()) {
-                                reply = new SendMessage(chatId, "Uso corretto: /rate <anime/manga> <titolo> <1-10>");
-                            } else {
-                                String[] partsRate = rest.split(" ");
-                                if (partsRate.length < 2) {
-                                    reply = new SendMessage(chatId, "Uso corretto: /rate <anime/manga> <titolo> <1-10>");
-                                } else {
-                                    try {
-                                        int rating = Integer.parseInt(partsRate[partsRate.length - 1]); // ultimo = voto
-                                        String titleRate = String.join(" ", Arrays.copyOf(partsRate, partsRate.length - 1)); // resto = titolo
-
-                                        if (rating < 1 || rating > 10)
-                                            reply = new SendMessage(chatId, "Il voto deve essere tra 1 e 10!");
-                                        else if (WatchlistDAO.updateRating(userId, type, titleRate, rating))
-                                            reply = new SendMessage(chatId, "Voto aggiornato!");
-                                        else
-                                            reply = new SendMessage(chatId, "Errore: titolo non trovato nella tua watchlist.");
-                                    } catch (NumberFormatException e) {
-                                        reply = new SendMessage(chatId, "Il voto deve essere un numero!");
-                                    }
-                                }
-                            }
-                            telegramClient.execute(reply);
-                            break;
-
-                        case "/note":
-                            if (rest.isEmpty()) {
-                                reply = new SendMessage(chatId, "Uso corretto: /note <anime/manga> <titolo> <testo>");
-                            } else {
-                                String[] partsNote = rest.split(" ", 2); // divide in titolo + testo
-                                if (partsNote.length < 2) {
-                                    reply = new SendMessage(chatId, "Uso corretto: /note <anime/manga> <titolo> <testo>");
-                                } else {
-                                    String titleNote = partsNote[0];      // prima parola come titolo
-                                    String noteText = partsNote[1];       // resto come nota
-                                    if (WatchlistDAO.updateNote(userId, type, titleNote, noteText))
-                                        reply = new SendMessage(chatId, "Nota aggiornata!");
-                                    else
-                                        reply = new SendMessage(chatId, "Errore: titolo non trovato nella tua watchlist.");
-                                }
-                            }
-                            telegramClient.execute(reply);
-                            break;
-                    }
-                }
+            // --- Liste (senza parametri) ---
+            if (text.equalsIgnoreCase("/listwatch")) {
+                handleListWatch(chatId, userId);
+                return;
             }
 
-            // --- Liste ---
-            else if (text.equalsIgnoreCase("/listwatch")) {
-                List<WatchlistItem> animeList = WatchlistDAO.listWatching(userId, "anime");
-                List<WatchlistItem> mangaList = WatchlistDAO.listWatching(userId, "manga");
-
-                List<WatchlistItem> allList = new ArrayList<>();
-                allList.addAll(animeList);
-                allList.addAll(mangaList);
-
-                String message = allList.isEmpty() ? "Nessun anime/manga da guardare!" :
-                        allList.stream()
-                                .map(i -> i.getType() + ": " + i.getTitle())
-                                .collect(Collectors.joining("\n"));
-
-                telegramClient.execute(new SendMessage(chatId, message));
+            if (text.equalsIgnoreCase("/listwatched")) {
+                handleListWatched(chatId, userId);
+                return;
             }
 
-            else if (text.equalsIgnoreCase("/listwatched")) {
-                List<WatchlistItem> animeList = WatchlistDAO.listWatched(userId, "anime");
-                List<WatchlistItem> mangaList = WatchlistDAO.listWatched(userId, "manga");
-
-                List<WatchlistItem> allList = new ArrayList<>();
-                allList.addAll(animeList);
-                allList.addAll(mangaList);
-
-                String message = allList.isEmpty() ? "Nessun anime/manga visto!" :
-                        allList.stream()
-                                .map(i -> i.getType() + ": " + i.getTitle())
-                                .collect(Collectors.joining("\n"));
-
-                telegramClient.execute(new SendMessage(chatId, message));
+            // --- Comandi con parametri ---
+            if (text.startsWith("/")) {
+                handleCommand(chatId, userId, text);
+                return;
             }
-
 
             // --- Ricerca anime/manga ---
-            else if (userMode.containsKey(userId)) {
-                String mode = userMode.get(userId);
-                if (mode != null) {
-                    String message;
-                    if (mode.equals("anime")) {
-                        Anime anime = kitsuApi.searchAnime(text);
-                        if (anime != null) {
-                            AnimeDAO.saveAnime(anime);
-                            String epText = (anime.episodes == null || anime.episodes == 0) ? "In corso" : anime.episodes.toString();
-                            message = "*Titolo:* " + anime.title + "\n"
-                                    + "*Episodi:* " + epText + "\n"
-                                    + "*Rating:* " + anime.rating + "\n"
-                                    + "*Data inizio:* " + (anime.startDate.isEmpty() ? "N/A" : anime.startDate) + "\n"
-                                    + "*Trailer:* " + (anime.trailerUrl.isEmpty() ? "N/A" : anime.trailerUrl) + "\n"
-                                    + "*Sito ufficiale:* " + (anime.officialSite.isEmpty() ? "N/A" : anime.officialSite) + "\n"
-                                    + "*Trama:* " + anime.synopsis + "\n"
-                                    + "*Poster:* " + (anime.imageUrl.isEmpty() ? "N/A" : anime.imageUrl);
-                        } else message = "Anime non trovato!";
-                    } else {
-                        Manga manga = kitsuApi.searchManga(text);
-                        if (manga != null) {
-                            MangaDAO.saveManga(manga);
-                            String chapText = (manga.chapters == null || manga.chapters == 0) ? "In corso" : manga.chapters.toString();
-                            message = "*Titolo:* " + manga.title + "\n"
-                                    + "*Capitoli:* " + chapText + "\n"
-                                    + "*Rating:* " + manga.rating + "\n"
-                                    + "*Data inizio:* " + (manga.startDate.isEmpty() ? "N/A" : manga.startDate) + "\n"
-                                    + "*Sito ufficiale:* " + (manga.officialSite.isEmpty() ? "N/A" : manga.officialSite) + "\n"
-                                    + "*Trama:* " + manga.synopsis + "\n"
-                                    + "*Copertina:* " + (manga.imageUrl.isEmpty() ? "N/A" : manga.imageUrl);
-                        } else message = "Manga non trovato!";
-                    }
-                    telegramClient.execute(new SendMessage(chatId, message));
-                    userMode.put(userId, null);
-                }
+            if (userMode.containsKey(userId) && userMode.get(userId) != null) {
+                handleSearch(chatId, userId, text);
+                return;
             }
 
             // --- Echo di default ---
-            else {
-                telegramClient.execute(new SendMessage(chatId, "Hai scritto: " + text));
-            }
+            telegramClient.execute(new SendMessage(chatId, "Hai scritto: " + text));
 
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
     }
+
+    // ========== METODI HELPER ==========
+
+    private void handleListWatch(String chatId, long userId) throws TelegramApiException {
+        List<WatchlistItem> animeList = WatchlistDAO.listWatching(userId, "anime");
+        List<WatchlistItem> mangaList = WatchlistDAO.listWatching(userId, "manga");
+
+        List<WatchlistItem> allList = new ArrayList<>();
+        allList.addAll(animeList);
+        allList.addAll(mangaList);
+
+        String message = allList.isEmpty() ? "📭 Nessun anime/manga da guardare!" :
+                "📺 LA TUA WATCHLIST:\n\n" + allList.stream()
+                        .map(i -> String.format("📌 %s: %s\n   Progress: %d%s%s",
+                                i.getType().toUpperCase(),
+                                i.getTitle(),
+                                i.getProgress(),
+                                i.getRating() != null ? " • ⭐ " + i.getRating() + "/10" : "",
+                                i.getNote() != null && !i.getNote().isEmpty() ? "\n   💭 " + i.getNote() : ""))
+                        .collect(Collectors.joining("\n\n"));
+
+        telegramClient.execute(new SendMessage(chatId, message));
+    }
+
+    private void handleListWatched(String chatId, long userId) throws TelegramApiException {
+        List<WatchlistItem> animeList = WatchlistDAO.listWatched(userId, "anime");
+        List<WatchlistItem> mangaList = WatchlistDAO.listWatched(userId, "manga");
+
+        List<WatchlistItem> allList = new ArrayList<>();
+        allList.addAll(animeList);
+        allList.addAll(mangaList);
+
+        String message = allList.isEmpty() ? "📭 Nessun anime/manga completato!" :
+                "✅ COMPLETATI:\n\n" + allList.stream()
+                        .map(i -> String.format("✔️ %s: %s%s%s",
+                                i.getType().toUpperCase(),
+                                i.getTitle(),
+                                i.getRating() != null ? " • ⭐ " + i.getRating() + "/10" : "",
+                                i.getNote() != null && !i.getNote().isEmpty() ? "\n   💭 " + i.getNote() : ""))
+                        .collect(Collectors.joining("\n\n"));
+
+        telegramClient.execute(new SendMessage(chatId, message));
+    }
+
+    private void handleCommand(String chatId, long userId, String text) throws TelegramApiException {
+        String[] parts = text.split(" ", 3);
+        String command = parts[0].toLowerCase();
+
+        if (parts.length < 3) {
+            String usage = switch (command) {
+                case "/addwatch" -> "Uso corretto: /addwatch <anime/manga> <titolo>";
+                case "/done" -> "Uso corretto: /done <anime/manga> <titolo>";
+                case "/remove" -> "Uso corretto: /remove <anime/manga> <titolo>";
+                case "/progress" -> "Uso corretto: /progress <anime/manga> <titolo> <numero>";
+                case "/rate" -> "Uso corretto: /rate <anime/manga> <titolo> <1-10>";
+                case "/note" -> "Uso corretto: /note <anime/manga> <titolo> <testo>";
+                default -> "Comando non riconosciuto. Usa /help per la lista comandi.";
+            };
+            telegramClient.execute(new SendMessage(chatId, usage));
+            return;
+        }
+
+        String type = parts[1].toLowerCase();
+        String rest = parts[2].trim();
+
+        if (!type.equals("anime") && !type.equals("manga")) {
+            telegramClient.execute(new SendMessage(chatId, "⚠️ Tipo non valido! Usa 'anime' o 'manga'."));
+            return;
+        }
+
+        SendMessage reply;
+
+        switch (command) {
+            case "/addwatch" -> {
+                String title = rest;
+
+                if (WatchlistDAO.existsInWatchlist(userId, type, title)) {
+                    String status = WatchlistDAO.getStatus(userId, type, title);
+
+                    if ("completed".equalsIgnoreCase(status)) {
+                        reply = new SendMessage(chatId,
+                                "⚠️ Questo " + type + " è già nella tua watchlist come *Completato*.\n" +
+                                        "💡 Usa /remove " + type + " " + title + " se vuoi rimuoverlo prima di riaggiungerlo.");
+                    } else {
+                        reply = new SendMessage(chatId,
+                                "⚠️ Questo " + type + " è già nella tua watchlist come *In corso*.");
+                    }
+                } else if (WatchlistDAO.addToWatchlist(userId, type, title)) {
+                    reply = new SendMessage(chatId, "✅ Aggiunto alla tua watchlist: " + title);
+                } else {
+                    reply = new SendMessage(chatId, "❌ Errore durante l'aggiunta alla watchlist.");
+                }
+                telegramClient.execute(reply);
+            }
+
+            case "/done" -> {
+                String title = rest;
+
+                if (!WatchlistDAO.existsInWatchlist(userId, type, title)) {
+                    reply = new SendMessage(chatId, "⚠️ Titolo non trovato nella tua watchlist.");
+                } else if (WatchlistDAO.markAsDone(userId, type, title)) {
+                    // Aggiorna le statistiche
+                    if (type.equals("anime")) {
+                        StatsDAO.incrementAnimeWatched(userId);
+                    } else {
+                        StatsDAO.incrementMangaRead(userId);
+                    }
+
+                    reply = new SendMessage(chatId, "✅ Segnato come completato: " + title);
+                } else {
+                    reply = new SendMessage(chatId, "❌ Errore durante l'operazione.");
+                }
+                telegramClient.execute(reply);
+            }
+
+            case "/remove" -> {
+                String title = rest;
+
+                if (!WatchlistDAO.existsInWatchlist(userId, type, title)) {
+                    reply = new SendMessage(chatId, "⚠️ Titolo non trovato nella tua watchlist.");
+                } else if (WatchlistDAO.removeFromWatchlist(userId, type, title)) {
+                    reply = new SendMessage(chatId, "🗑️ Rimosso dalla tua watchlist: " + title);
+                } else {
+                    reply = new SendMessage(chatId, "❌ Errore durante la rimozione.");
+                }
+                telegramClient.execute(reply);
+            }
+
+            case "/progress" -> {
+                String[] progressParts = rest.split(" ");
+
+                if (progressParts.length < 2) {
+                    reply = new SendMessage(chatId, "⚠️ Uso corretto: /progress <anime/manga> <titolo> <numero>");
+                    telegramClient.execute(reply);
+                    return;
+                }
+
+                try {
+                    int progress = Integer.parseInt(progressParts[progressParts.length - 1]);
+                    String title = String.join(" ", Arrays.copyOf(progressParts, progressParts.length - 1));
+
+                    if (progress < 0) {
+                        reply = new SendMessage(chatId, "⚠️ Il progress deve essere un numero positivo!");
+                    } else if (!WatchlistDAO.existsInWatchlist(userId, type, title)) {
+                        reply = new SendMessage(chatId, "⚠️ Titolo non trovato nella tua watchlist.");
+                    } else if (WatchlistDAO.updateProgress(userId, type, title, progress)) {
+                        reply = new SendMessage(chatId, "📊 Progress aggiornato a " + progress + " per: " + title);
+                    } else {
+                        reply = new SendMessage(chatId, "❌ Errore durante l'aggiornamento.");
+                    }
+                } catch (NumberFormatException e) {
+                    reply = new SendMessage(chatId, "⚠️ Il progress deve essere un numero valido!");
+                }
+                telegramClient.execute(reply);
+            }
+
+            case "/rate" -> {
+                String[] rateParts = rest.split(" ");
+
+                if (rateParts.length < 2) {
+                    reply = new SendMessage(chatId, "⚠️ Uso corretto: /rate <anime/manga> <titolo> <1-10>");
+                    telegramClient.execute(reply);
+                    return;
+                }
+
+                try {
+                    int rating = Integer.parseInt(rateParts[rateParts.length - 1]);
+                    String title = String.join(" ", Arrays.copyOf(rateParts, rateParts.length - 1));
+
+                    if (rating < 1 || rating > 10) {
+                        reply = new SendMessage(chatId, "⚠️ Il voto deve essere tra 1 e 10!");
+                    } else if (!WatchlistDAO.existsInWatchlist(userId, type, title)) {
+                        reply = new SendMessage(chatId, "⚠️ Titolo non trovato nella tua watchlist.");
+                    } else if (WatchlistDAO.updateRating(userId, type, title, rating)) {
+                        reply = new SendMessage(chatId, "⭐ Voto aggiornato a " + rating + "/10 per: " + title);
+                    } else {
+                        reply = new SendMessage(chatId, "❌ Errore durante l'aggiornamento.");
+                    }
+                } catch (NumberFormatException e) {
+                    reply = new SendMessage(chatId, "⚠️ Il voto deve essere un numero valido!");
+                }
+                telegramClient.execute(reply);
+            }
+
+            case "/note" -> {
+                List<WatchlistItem> userItems = WatchlistDAO.listByStatus(userId, type, "watching");
+                userItems.addAll(WatchlistDAO.listByStatus(userId, type, "completed"));
+
+                String foundTitle = null;
+                String noteText = null;
+
+                for (WatchlistItem item : userItems) {
+                    if (rest.toLowerCase().startsWith(item.getTitle().toLowerCase())) {
+                        if (foundTitle == null || item.getTitle().length() > foundTitle.length()) {
+                            foundTitle = item.getTitle();
+                            noteText = rest.substring(foundTitle.length()).trim();
+                        }
+                    }
+                }
+
+                if (foundTitle == null || noteText == null || noteText.isEmpty()) {
+                    reply = new SendMessage(chatId,
+                            "⚠️ Titolo non trovato o nota mancante.\n" +
+                                    "Uso: /note <anime/manga> <titolo> <testo>\n" +
+                                    "Esempio: /note anime Death Note questa è una nota");
+                } else if (WatchlistDAO.updateNote(userId, type, foundTitle, noteText)) {
+                    reply = new SendMessage(chatId, "📝 Nota aggiornata per: " + foundTitle);
+                } else {
+                    reply = new SendMessage(chatId, "❌ Errore durante l'aggiornamento della nota.");
+                }
+                telegramClient.execute(reply);
+            }
+
+            default -> {
+                reply = new SendMessage(chatId, "❌ Comando non riconosciuto. Usa /help per la lista comandi.");
+                telegramClient.execute(reply);
+            }
+        }
+    }
+
+    private void handleSearch(String chatId, long userId, String text) throws TelegramApiException {
+        String mode = userMode.get(userId);
+        String message;
+
+        if (mode.equals("anime")) {
+            Anime anime = kitsuApi.searchAnime(text);
+            if (anime != null) {
+                AnimeDAO.saveAnime(anime);
+                String epText = (anime.episodes == null || anime.episodes == 0) ? "In corso" : anime.episodes.toString();
+                message = "*Titolo:* " + anime.title + "\n"
+                        + "*Episodi:* " + epText + "\n"
+                        + "*Rating:* " + anime.rating + "\n"
+                        + "*Data inizio:* " + (anime.startDate.isEmpty() ? "N/A" : anime.startDate) + "\n"
+                        + "*Trailer:* " + (anime.trailerUrl.isEmpty() ? "N/A" : anime.trailerUrl) + "\n"
+                        + "*Sito ufficiale:* " + (anime.officialSite.isEmpty() ? "N/A" : anime.officialSite) + "\n"
+                        + "*Trama:* " + anime.synopsis + "\n"
+                        + "*Poster:* " + (anime.imageUrl.isEmpty() ? "N/A" : anime.imageUrl);
+            } else {
+                message = "❌ Anime non trovato!";
+            }
+        } else {
+            Manga manga = kitsuApi.searchManga(text);
+            if (manga != null) {
+                MangaDAO.saveManga(manga);
+                String chapText = (manga.chapters == null || manga.chapters == 0) ? "In corso" : manga.chapters.toString();
+                message = "*Titolo:* " + manga.title + "\n"
+                        + "*Capitoli:* " + chapText + "\n"
+                        + "*Rating:* " + manga.rating + "\n"
+                        + "*Data inizio:* " + (manga.startDate.isEmpty() ? "N/A" : manga.startDate) + "\n"
+                        + "*Sito ufficiale:* " + (manga.officialSite.isEmpty() ? "N/A" : manga.officialSite) + "\n"
+                        + "*Trama:* " + manga.synopsis + "\n"
+                        + "*Copertina:* " + (manga.imageUrl.isEmpty() ? "N/A" : manga.imageUrl);
+            } else {
+                message = "❌ Manga non trovato!";
+            }
+        }
+
+        telegramClient.execute(new SendMessage(chatId, message));
+        userMode.put(userId, null);
+    }
 }
-
-
-/*
-sistemare:
-/note che nn funzionano con piu di il titolo con piu di 2 aprole
-/listwatched e /listwatch non funzionano
-e una sistema migliore di gestione per i vari commandi
-
- */

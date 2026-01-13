@@ -174,5 +174,27 @@ public class WatchlistDAO {
         }
         return false;
     }
+    // Ottiene lo status di un anime/manga nella watchlist
+    public static String getStatus(long userId, String type, String title) {
+        String sql = "SELECT status FROM Watchlist WHERE user_id=? AND type=? AND title=?";
+        try (Connection conn = Database.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setLong(1, userId);
+            ps.setString(2, type.toLowerCase());
+            ps.setString(3, title);
+
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String status = rs.getString("status");
+                rs.close();
+                return status;
+            }
+            rs.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
 
 }
