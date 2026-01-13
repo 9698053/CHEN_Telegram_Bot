@@ -82,3 +82,10 @@ start_date TEXT
 Gestione DB tramite **DAO** dedicati (`UserDAO`, `WatchlistDAO`, `AnimeDAO`, `MangaDAO`).
 
 ---
+
+**Difetti del API**
+-non mostra il episodio attuale
+-non ritorna la lingua del anime
+-non torna il linke del episodio
+
+
