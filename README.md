@@ -20,6 +20,7 @@ Il bot utilizza le **Kitsu REST API** per:
 * `/anime` → modalità ricerca anime
 * `/manga` → modalità ricerca manga
   *(dopo il comando, scrivi il titolo)*
+* /help → mostra il menu dei commandi
 
 ### Watchlist
 
