@@ -1,19 +1,19 @@
-# 🎌 KitsuBot – Telegram Anime & Manga Tracker
+# KitsuBot – Telegram Anime & Manga Tracker
 
 Bot Telegram per cercare anime e manga e gestire una watchlist personale usando le **API di Kitsu.io**.
 
 ---
 
-## 🔌 API (Kitsu.io)
+## API (Kitsu.io)
 
 Il bot utilizza le **Kitsu REST API** per:
 
-* 🔍 Ricercare **anime** e **manga**
+ Ricercare **anime** e **manga**
 * 📄 Ottenere informazioni base (titolo, sinossi, episodi/capitoli, rating, immagini)
 
 ---
 
-## 🤖 Comandi Principali
+## Comandi Principali
 
 ### Ricerca
 
